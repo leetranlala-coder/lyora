@@ -17,7 +17,13 @@ With no `ANTHROPIC_API_KEY`, everything runs on an offline mock. That's useful f
 
 ## 2. Products, stock and testimonials (`config/products.json`)
 
-This file is the only place the AI gets prices, payment plans, inclusions, links, stock and testimonials from. The first version was filled in from the Kajabi offers that existed on 5 Oct 2026, and **every product is inactive** until you check it.
+This file is the only place the AI gets prices, payment plans, inclusions, links, stock, testimonials and facts about you from. It was built on 5 Oct 2026 from your published Kajabi offers and your business handover.
+
+**Sellable now:** the free preview, The Online Nail Course ($450 or 9 × $50 weekly), the VIP Experience ($1,950 or 8 × $250 monthly), the Full Professional Kit ($1,200) and the Lyora Lights Membership ($15/month).
+
+**Switched off, with the reason in each `notes`:** Business Accelerator (Kajabi says $4,497 but your handover says "from $2,950"), Business Blueprint (not launched yet), Power Hour, all 1:1 / in-person training (full until 2027), and the custom 4 × $275 mentorship (built for one student).
+
+`brand_facts` holds true things about you the AI may mention when relevant: nurse, ~10 years in nails, the $2,000 you wasted on products, 1:1 full until 2027, and so on.
 
 For each product:
 
@@ -48,7 +54,7 @@ Use official integrations only. No scraping, and never your Instagram password.
      { "subscriber_id": "{{user_id}}", "username": "{{ig_username}}", "name": "{{full_name}}",
        "email": "{{email}}", "text": "{{last_input_text}}", "source": "default reply" }
      ```
-3. Make sure ManyChat isn't also auto-replying in that flow, or leads will get two replies.
+3. Only send the **Default Reply** (messages that don't match a keyword) to this system. Leave your keyword flows (PREVIEW, KIT/PRODUCTS, CALL/1:1, booking) exactly as they are, and make sure the Default Reply isn't also auto-replying, or leads will get two replies.
 4. Before going live, check the field names and the sending endpoint (`/fb/sending/sendContent`) against ManyChat's current API docs.
 
 ManyChat doesn't tell this system when you reply yourself in the Instagram app, so use **take over** in the dashboard when you jump into a conversation.

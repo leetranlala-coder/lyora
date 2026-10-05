@@ -14,7 +14,7 @@ const File = z.object({
       name: z.string(),
       type: ProductType,
       active: z.boolean(),
-      price: z.number().positive().nullable(),
+      price: z.number().nonnegative().nullable(),
       currency: z.string().default("AUD"),
       payment_plan_available: z.boolean(),
       payment_plan_description: z.string().nullable(),
@@ -40,6 +40,7 @@ const File = z.object({
       shipping_enabled: z.boolean(),
     }),
   ),
+  brand_facts: z.array(z.object({ id: z.string(), text: z.string() })).default([]),
   social_proof: z.array(
     z.object({
       id: z.string(),
@@ -70,6 +71,7 @@ for (const p of data.products) {
 }
 for (const s of data.stock) repos.stock.upsert(s, now);
 for (const sp of data.social_proof) repos.proof.upsert(sp, now);
+repos.brandFacts.replaceAll(data.brand_facts, now);
 
-console.log(`seeded ${data.products.length} products (${data.products.filter((p) => p.active).length} active), ${data.stock.length} stock rows, ${data.social_proof.filter((s) => s.approved_for_use).length} approved testimonials`);
+console.log(`seeded ${data.products.length} products (${data.products.filter((p) => p.active).length} active), ${data.stock.length} stock rows, ${data.social_proof.filter((s) => s.approved_for_use).length} approved testimonials, ${data.brand_facts.length} brand facts`);
 for (const w of warnings) console.log(`  ! ${w}`);

@@ -63,13 +63,19 @@ const PATTERNS: { type: string; re: RegExp; detail: string }[] = [
     detail: "claims an action the system has not performed",
   },
   {
+    type: "impersonation_claim",
+    re: /\b(it'?s (really|actually|genuinely|honestly) me|i answer (every|each) (one|message|dm)( myself)?|i'?m (a )?real (person|human)|not a bot|this isn'?t (a bot|automated|ai))\b/i,
+    detail: "claims a human is personally typing — never true for an AI draft",
+  },
+  {
     type: "ai_disclosure_slip",
     re: /\b(as an ai|language model|i'?m an? (bot|assistant|ai)|my instructions|system prompt)\b/i,
     detail: "breaks character / leaks internals",
   },
 ];
 
-const SHIPPING_RE = /\b(ship(s|ped|ping)?|dispatch(ed)?|posted|postage|deliver(y|ed)?|arrives?|business days|ready to (go|send)|sent out)\b/i;
+const SHIPPING_RE = /\b(ship(s|ped|ping)?|dispatch(ed)?|posted|postage|deliver(y|ed)?|arrives?|business days|ready to (go|send)|sent out|sent after|pickup)\b/i;
+const SHIP_TIME_RE = /\b(\d+\s*(business |working )?(days?|weeks?)|tomorrow|next day|same day|this week|overnight|express|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i;
 const STOCK_RE = /\b(in stock|available now|ready to go|plenty left|back in stock)\b/i;
 const DISCOUNT_RE = /(\d+\s?%\s?off|\bdiscount(ed)?\b|\bcoupon\b|\bpromo\b|\bspecial (price|offer|deal)\b|\bon sale\b|\bcheaper for you\b)/i;
 const MONEY_RE = /\$\s?\d[\d,]*(?:\.\d{1,2})?k?|\b\d[\d,]*(?:\.\d{1,2})?\s?(?:aud|dollars|bucks)\b/gi;
@@ -116,8 +122,19 @@ export function deterministicCheck(messages: string[], facts: Fact[], action: Sa
   if (DISCOUNT_RE.test(all) && !DISCOUNT_RE.test(factText)) {
     issues.push({ type: "invented_discount", detail: "mentions a discount/sale that isn't in the facts", severity: "block" });
   }
-  if (SHIPPING_RE.test(all) && !hasFulfilmentFact) {
-    issues.push({ type: "unverified_shipping", detail: "mentions shipping/delivery timing without verified fulfilment data", severity: "block" });
+  // Shipping POLICY may be repeated if it is in the facts (e.g. "posted anywhere in australia");
+  // shipping TIMING ("2 business days", "tomorrow") needs a verified fulfilment fact.
+  const shippingPolicyInFacts = SHIPPING_RE.test(factText);
+  for (const m of messages) {
+    if (!SHIPPING_RE.test(m)) continue;
+    if (SHIP_TIME_RE.test(m) && !hasFulfilmentFact) {
+      issues.push({ type: "unverified_shipping", detail: "states a shipping/delivery time without verified fulfilment data", severity: "block" });
+      break;
+    }
+    if (!shippingPolicyInFacts && !hasFulfilmentFact) {
+      issues.push({ type: "unverified_shipping", detail: "mentions shipping/delivery that isn't in the product facts", severity: "block" });
+      break;
+    }
   }
   if (STOCK_RE.test(all) && !hasStockFact) {
     issues.push({ type: "unverified_stock", detail: "mentions stock availability without verified stock data", severity: "block" });

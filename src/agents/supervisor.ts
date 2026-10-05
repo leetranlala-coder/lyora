@@ -237,8 +237,8 @@ export function postRules(
     ctx.analysis.purchase_intent !== "ready_to_buy" &&
     (out.action === "SEND_ENROLMENT_INFORMATION" || out.action === "RECOMMEND_COURSE_AND_KIT")
   ) {
-    adj.push(`${out.action} -> NURTURE (lead said she can't afford it right now)`);
-    out = { ...out, action: "NURTURE", product_ids: [] };
+    adj.push(`${out.action} -> NURTURE (lead said she can't afford it right now; only free options kept)`);
+    out = { ...out, action: "NURTURE", product_ids: out.product_ids.filter((id) => byId.get(id)?.type === "free") };
   }
 
   // 8. very hot + high ticket -> Lee personally

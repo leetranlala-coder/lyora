@@ -269,6 +269,7 @@ export class LyoraAgent {
         products: decision.product_ids.map((id) => products.find((p) => p.id === id)!).filter(Boolean),
         stockFor,
         approvedProof: repos.proof.approved(),
+        brandFacts: repos.brandFacts.active(),
         defaultBookingUrl: cfg.DEFAULT_BOOKING_URL || null,
       });
       let composed;
@@ -502,6 +503,7 @@ export class LyoraAgent {
       products: d.product_ids.map((id) => products.find((p) => p.id === id)!).filter(Boolean),
       stockFor,
       approvedProof: repos.proof.approved(),
+        brandFacts: repos.brandFacts.active(),
       defaultBookingUrl: cfg.DEFAULT_BOOKING_URL || null,
     });
     const composed = await composeValidated(this.ctx, { leadId: lead.id, runId, trigger: "followup", decision: d, analysis, conversation, facts, followUpContext: fu.context });

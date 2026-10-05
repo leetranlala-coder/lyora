@@ -14,7 +14,8 @@ export interface Fact {
     | "excludes"
     | "stock"
     | "fulfilment"
-    | "social_proof";
+    | "social_proof"
+    | "brand";
   product_id?: string;
   text: string;
 }

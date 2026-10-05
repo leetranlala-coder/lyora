@@ -20,6 +20,9 @@ export interface Signals {
   customPricing: boolean;
   wantsLee: boolean;
   claimsPurchased: boolean;
+  clientBooking: boolean;
+  possibleMinor: boolean;
+  oneToOneEnquiry: boolean;
   priceAsk: boolean;
   paymentPlanAsk: boolean;
   cannotAfford: boolean;
@@ -62,6 +65,12 @@ const R = {
     /\b(speak|talk|chat) (to|with) (lee|you|a (real )?person|someone|a human)\b|\breal person\b|\b(is this|are you) (a )?(bot|ai|automated|real)\b|\bis this lee\b/i,
   claimsPurchased:
     /\b(i (just )?(paid|enrolled|enrolled|purchased|bought|signed up|joined)|just paid|payment (has )?(gone|went) through|i'?ve (paid|enrolled|purchased|bought|signed up))\b/i,
+  clientBooking:
+    /\b(book (me )?in|book an appointment|nail appointment|an appointment|do my nails|get my nails done|available for a set|any (spots|availability|openings)|have (a |any )?(spot|availability|opening)s?|can i get (a set|infills|a fill)|infill appointment)\b/i,
+  possibleMinor:
+    /\b(i'?m|im|i am) (1[0-7])\b|\b(1[0-7]) ?(yo|y\/o|years? old)\b|\byear (9|10|11|12)\b|\b(in|at) high ?school\b|\bstill (at|in) school\b|\bwace\b/i,
+  oneToOneEnquiry:
+    /(?<!\d)1 ?(:|-|on|to) ?1(?!\d)|\b(one[\s-]on[\s-]one|in[\s-]person|private training|train(ing)? with you|come to (your|the) (salon|studio)|luxe foundations|signature mentorship|nail art mastery)\b/i,
   priceAsk: /\b(how much|price|pricing|cost|costs|investment|fee|fees)\b|\$/i,
   paymentPlanAsk:
     /\b(payment ?plans?|instal+ments?|afterpay|zip ?pay|pay (it )?off|split (the |it )?(payments?|cost)?|weekly payments?|pay weekly|pay in parts|pay over time)\b/i,
@@ -135,6 +144,9 @@ export function detectSignals(text: string): Signals {
     customPricing: test(R.customPricing),
     wantsLee: test(R.wantsLee),
     claimsPurchased: test(R.claimsPurchased),
+    clientBooking: test(R.clientBooking) && !test(R.wantsCall),
+    possibleMinor: test(R.possibleMinor),
+    oneToOneEnquiry: test(R.oneToOneEnquiry),
     priceAsk: test(R.priceAsk),
     paymentPlanAsk: test(R.paymentPlanAsk),
     cannotAfford: test(R.cannotAfford),
@@ -185,5 +197,8 @@ export function sensitiveHandoff(s: Signals): { reason: string; priority: "norma
   if (s.customPricing) return { reason: "custom pricing request", priority: "normal" };
   if (s.discountRequest) return { reason: "discount request", priority: "normal" };
   if (s.wantsLee) return { reason: "asked to speak to lee directly", priority: "high" };
+  if (s.possibleMinor) return { reason: "possibly under 18 — no selling, lee to handle", priority: "normal" };
+  if (s.oneToOneEnquiry) return { reason: "1:1 / in-person training enquiry (1:1 is full until 2027)", priority: "high" };
+  if (s.clientBooking) return { reason: "nail appointment request — appointments are booked by lee in DMs, not a course lead", priority: "normal" };
   return null;
 }

@@ -35,7 +35,7 @@ export async function composeValidated(
       followUpContext: input.followUpContext,
       previousIssues,
     });
-    const messages = gen.output.messages.map((m) => m.trim()).filter(Boolean);
+    const messages = gen.output.messages.map(cleanBubble).filter(Boolean);
     ctx.repos.audit.write({
       lead_id: input.leadId,
       run_id: input.runId,
@@ -70,4 +70,14 @@ export async function composeValidated(
     previousIssues = verdict.issues.filter((i) => i.severity === "block").map((i) => `${i.type}: ${i.detail}`);
   }
   return { ok: false, issues: lastIssues };
+}
+
+/** House style: no em/en dashes in Lee's messages (she never uses them), tidy whitespace. */
+export function cleanBubble(m: string): string {
+  return m
+    .replace(/\s*[\u2014]\s*/g, ", ")
+    .replace(/\s+[\u2013]\s+/g, ", ")
+    .replace(/,\s*,/g, ",")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }

@@ -125,7 +125,7 @@ export const SafetyVerdictSchema = z.object({
 export type SafetyVerdict = z.infer<typeof SafetyVerdictSchema>;
 
 // ------------------------------------------------------------- records
-export const ProductType = z.enum(["course", "kit", "course_and_kit", "coaching", "training", "mentorship", "membership"]);
+export const ProductType = z.enum(["free", "course", "kit", "course_and_kit", "coaching", "training", "mentorship", "membership"]);
 export type ProductType = z.infer<typeof ProductType>;
 
 export interface Product {

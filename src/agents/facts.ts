@@ -12,9 +12,10 @@ export function formatPrice(price: number, currency: string): string {
   return `$${n} ${currency}`;
 }
 
-/** A product is sellable only if it is active and its price is known. */
+/** A product is sellable only if it is active and its price is known ($0 for free products). */
 export function isSellable(p: Product): boolean {
-  return p.active && p.price !== null && p.price !== undefined && p.price > 0;
+  if (!p.active || p.price === null || p.price === undefined) return false;
+  return p.type === "free" ? p.price === 0 : p.price > 0;
 }
 
 /** Stock is good enough to recommend a stock-required product (no shipping promise implied). */
@@ -62,6 +63,8 @@ export interface FactContext {
   stockFor: (sku: string) => StockItem | null;
   approvedProof: SocialProof[];
   defaultBookingUrl: string | null;
+  /** Always-true facts about Lee and LYORA (her story, policies) from config. */
+  brandFacts?: string[];
 }
 
 export function buildFacts(ctx: FactContext): Fact[] {
@@ -73,14 +76,16 @@ export function buildFacts(ctx: FactContext): Fact[] {
 
   for (const p of ctx.products) {
     add({ type: "product", product_id: p.id, text: `${p.name} (${p.type.replace(/_/g, " ")})` });
-    if (p.price !== null) add({ type: "price", product_id: p.id, text: `${p.name} costs ${formatPrice(p.price, p.currency)}` });
+    if (p.price !== null) {
+      add({ type: "price", product_id: p.id, text: p.price === 0 ? `${p.name} is completely free, no card needed` : `${p.name} costs ${formatPrice(p.price, p.currency)}` });
+    }
     if (p.payment_plan_available && p.payment_plan_description) {
       add({ type: "payment_plan", product_id: p.id, text: `payment plan for ${p.name}: ${p.payment_plan_description}` });
     }
     for (const inc of p.includes) add({ type: "includes", product_id: p.id, text: `${p.name} includes: ${inc}` });
     for (const exc of p.excludes) add({ type: "excludes", product_id: p.id, text: `${p.name} does NOT include: ${exc}` });
 
-    if (linkActions.has(a) && p.checkout_url) {
+    if ((linkActions.has(a) || p.price === 0) && p.checkout_url) {
       add({ type: "checkout_link", product_id: p.id, text: `checkout link for ${p.name} (pay in full): ${p.checkout_url}` });
     }
     if (linkActions.has(a) && p.payment_plan_available && p.payment_plan_checkout_url) {
@@ -108,6 +113,8 @@ export function buildFacts(ctx: FactContext): Fact[] {
   if (a === "OFFER_CALL" && !facts.some((f) => f.type === "booking_link") && ctx.defaultBookingUrl) {
     add({ type: "booking_link", text: `link to book a call with lee: ${ctx.defaultBookingUrl}` });
   }
+
+  for (const text of ctx.brandFacts ?? []) add({ type: "brand", text });
 
   // Approved social proof relevant to this lead (max 2). Never fabricated, never edited.
   const wanted = new Set(

@@ -292,3 +292,59 @@ describe("LYORA DM scenarios", () => {
     expect(h.repos.purchases.forLead(lead.id)).toHaveLength(1);
   });
 });
+
+describe("lee's business rules (from the 5 Oct handover)", () => {
+  it("nail appointment requests go to lee, never a sales reply", async () => {
+    const h = makeHarness();
+    const { lead, result } = await h.dm("hi! do you have any availability for a set this saturday?");
+    expect(done(result).decision.action).toBe("HUMAN_HANDOFF");
+    expect(h.repos.leads.get(lead.id)!.handoff_reason).toMatch(/appointment/);
+    expect(h.drafts(lead.id)).toHaveLength(0);
+  });
+
+  it("possible under-18s are never sold to", async () => {
+    const h = makeHarness();
+    const { lead, result } = await h.dm("hi i'm 16 and in year 11, how much is the course?");
+    expect(done(result).decision.action).toBe("HUMAN_HANDOFF");
+    expect(h.repos.leads.get(lead.id)!.handoff_reason).toMatch(/under 18/);
+  });
+
+  it("1:1 / in-person enquiries go to lee (1:1 full until 2027)", async () => {
+    const h = makeHarness();
+    const { lead, result } = await h.dm("do you do 1:1 in person training?");
+    expect(done(result).decision.action).toBe("HUMAN_HANDOFF");
+    expect(h.repos.leads.get(lead.id)!.handoff_priority).toBe("high");
+  });
+
+  it("a lead who can't afford it can be pointed to the free preview (with its link)", async () => {
+    const llm = new MockLLMProvider({ decision: { action: "NURTURE", product_ids: ["free-preview"], confidence: 0.9 } });
+    const h = makeHarness({ llm });
+    h.repos.products.upsert(
+      { id: "free-preview", name: "the free preview", type: "free", active: true, price: 0, currency: "AUD", payment_plan_available: false, payment_plan_description: null, includes: ["the first modules"], excludes: [], checkout_url: "https://www.lyora.com.au/offers/BLwddLaS/checkout", payment_plan_checkout_url: null, booking_url: null, stock_required: false, sku: null, external_ids: {}, notes: null },
+      h.clock.now().toISOString(),
+    );
+    const { lead, result } = await h.dm("i'm a beginner but money is really tight right now, i can't afford it");
+    const r = done(result);
+    expect(r.decision.product_ids).toEqual(["free-preview"]);
+    const draft = h.repos.audit.forLead(lead.id).find((a) => a.event === "draft_attempt_1");
+    expect(String(draft!.data_json)).toContain("completely free, no card needed");
+    expect(String(draft!.data_json)).toContain("BLwddLaS");
+  });
+
+  it("brand facts reach the writer and their amounts pass the safety check", async () => {
+    const llm = new MockLLMProvider({ response: { messages: ["honestly i wasted about $2,000 on the wrong products when i started"], claims_used: [] } });
+    const h = makeHarness({ llm });
+    h.repos.brandFacts.replaceAll([{ id: "b2", text: "lee wasted about $2,000 on the wrong products before her first paying client" }], h.clock.now().toISOString());
+    const { result } = await h.dm("i'm a complete beginner, what should i buy first?");
+    expect(done(result).outcome).toBe("draft_created");
+  });
+
+  it("em dashes are removed and impersonation claims are blocked", async () => {
+    const { cleanBubble } = await import("../src/pipeline/compose.js");
+    expect(cleanBubble("honestly — it's so common")).toBe("honestly, it's so common");
+    const llm = new MockLLMProvider({ response: { messages: ["it's really me, i answer every one myself xx"], claims_used: [] } });
+    const h = makeHarness({ llm });
+    const { result } = await h.dm("hi is the course good for beginners?");
+    expect(result.status).toBe("handoff");
+  });
+});

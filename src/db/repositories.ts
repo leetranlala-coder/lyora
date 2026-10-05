@@ -557,6 +557,20 @@ export class SocialProofRepository {
   }
 }
 
+export class BrandFactRepository {
+  constructor(private db: DB) {}
+  active(): string[] {
+    return (this.db.prepare("SELECT text FROM brand_facts WHERE active = 1 ORDER BY id").all() as { text: string }[]).map((r) => r.text);
+  }
+  replaceAll(facts: { id: string; text: string }[], now: string) {
+    tx(this.db, () => {
+      this.db.exec("DELETE FROM brand_facts");
+      const stmt = this.db.prepare("INSERT INTO brand_facts (id, text, active, created_at) VALUES (?, ?, 1, ?)");
+      for (const f of facts) stmt.run(f.id, f.text, now);
+    });
+  }
+}
+
 export class PurchaseRepository {
   constructor(private db: DB) {}
 
@@ -831,6 +845,7 @@ export interface Repos {
   products: ProductRepository;
   stock: StockRepository;
   proof: SocialProofRepository;
+  brandFacts: BrandFactRepository;
   purchases: PurchaseRepository;
   bookings: BookingRepository;
   followUps: FollowUpRepository;
@@ -850,6 +865,7 @@ export function createRepos(db: DB): Repos {
     products: new ProductRepository(db),
     stock: new StockRepository(db),
     proof: new SocialProofRepository(db),
+    brandFacts: new BrandFactRepository(db),
     purchases: new PurchaseRepository(db),
     bookings: new BookingRepository(db),
     followUps: new FollowUpRepository(db),

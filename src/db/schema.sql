@@ -145,6 +145,14 @@ CREATE TABLE IF NOT EXISTS social_proof (
   created_at TEXT NOT NULL
 );
 
+-- Always-true facts about Lee / LYORA the AI may state (her story, policies). From config/products.json.
+CREATE TABLE IF NOT EXISTS brand_facts (
+  id TEXT PRIMARY KEY,
+  text TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+
 -- ------------------------------------------------------------- outcomes
 CREATE TABLE IF NOT EXISTS purchases (
   id TEXT PRIMARY KEY,
