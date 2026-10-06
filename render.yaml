@@ -1,0 +1,44 @@
+# One-click deploy on Render (render.com → New → Blueprint → pick this repo).
+# Secrets are marked sync: false — Render asks you to paste them in; they never live in the repo.
+services:
+  - type: web
+    name: lyora-dm-agent
+    runtime: node
+    plan: starter            # needs a paid plan for the persistent disk below (the database lives there)
+    region: singapore        # closest Render region to Perth
+    branch: main
+    buildCommand: npm ci --include=dev && npm run build
+    # load config/products.json into the database on every start, then run the server
+    startCommand: node --disable-warning=ExperimentalWarning dist/cli/seed.js && npm start
+    healthCheckPath: /health
+    disk:
+      name: lyora-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "22.13.0"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_PATH
+        value: /var/data/lyora.db
+      - key: SEND_MODE
+        value: draft
+      - key: BUSINESS_TIMEZONE
+        value: Australia/Perth
+      - key: LLM_PROVIDER
+        value: anthropic
+      - key: MESSAGING_PROVIDER
+        value: manychat
+      - key: ADMIN_USERNAME
+        value: lee
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: MANYCHAT_API_KEY
+        sync: false
+      - key: MANYCHAT_WEBHOOK_SECRET
+        generateValue: true
+      - key: PUBLIC_BASE_URL
+        sync: false
