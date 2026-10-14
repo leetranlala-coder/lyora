@@ -86,11 +86,13 @@ export function buildApp(opts: { cfg?: AppConfig; clock?: Clock; scheduler?: Sch
     let parsed: ParsedWebhook;
     try {
       parsed = provider.parseWebhook(req.headers, req.rawBody);
+      if (provider.enrich) parsed = await provider.enrich(parsed);
     } catch (err) {
       if (err instanceof WebhookAuthError) {
         log.warn("webhook rejected", { provider: provider.name, reason: err.message });
         return text("unauthorized", 401);
       }
+      log.error("inbound webhook failed", { provider: provider.name, err });
       return text("bad request", 400);
     }
     const { leadIds, duplicates } = agent.ingestWebhook(parsed);

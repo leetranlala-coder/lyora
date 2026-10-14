@@ -32,24 +32,22 @@ export class ManyChatProvider implements MessagingProvider {
     const secret = headers["x-lyora-secret"] ?? "";
     if (!this.cfg.webhookSecret) throw new WebhookAuthError("MANYCHAT_WEBHOOK_SECRET not configured");
     if (!safeEqual(secret, this.cfg.webhookSecret)) throw new WebhookAuthError("bad secret");
-    const b = JSON.parse(rawBody) as Record<string, unknown>;
-    const subscriber = String(b.subscriber_id ?? "");
-    const text = String(b.text ?? "").trim();
-    if (!subscriber || !text) return { inbound: [], echoes: [] };
+    const b = lenientParse(rawBody);
+    const subscriber = String(b.subscriber_id ?? "").replace(/[^0-9A-Za-z_-]/g, "");
+    if (!subscriber) return { inbound: [], echoes: [] };
+    const text = typeof b.text === "string" ? b.text.trim() : "";
     const sentAt = typeof b.timestamp === "string" ? b.timestamp : new Date().toISOString();
-    // If ManyChat can't supply a message id, derive one from subscriber + text + minute so a
-    // retried webhook is de-duplicated (two identical messages in the same minute collapse to one).
-    const messageId = b.message_id ? String(b.message_id) : `mc_${sha256(`${subscriber}|${text}|${sentAt.slice(0, 16)}`).slice(0, 32)}`;
     const clean = (v: unknown) => {
       const s = typeof v === "string" ? v.trim() : "";
-      return s && !s.startsWith("{{") ? s : null;
+      return s && !s.startsWith("{") ? s : null;
     };
+    // Text may be empty here: enrich() then looks it up from ManyChat by contact id.
     return {
       inbound: [
         {
           platform: "instagram",
           platform_user_id: subscriber,
-          platform_message_id: messageId,
+          platform_message_id: b.message_id ? String(b.message_id) : text ? messageIdFor(subscriber, text, sentAt) : "",
           text,
           sent_at: sentAt,
           username: clean(b.username),
@@ -60,6 +58,39 @@ export class ManyChatProvider implements MessagingProvider {
       ],
       echoes: [],
     };
+  }
+
+  /** Fill in the message text (and profile) from ManyChat when the webhook only carried the contact id. */
+  async enrich(parsed: ParsedWebhook): Promise<ParsedWebhook> {
+    const inbound = [];
+    for (const e of parsed.inbound) {
+      if (e.text) {
+        inbound.push(e);
+        continue;
+      }
+      const info = await this.getSubscriberInfo(e.platform_user_id);
+      const text = typeof info?.last_input_text === "string" ? info.last_input_text.trim() : "";
+      if (!text) continue;
+      const at = typeof info?.last_interaction === "string" && info.last_interaction ? info.last_interaction : e.sent_at;
+      inbound.push({
+        ...e,
+        text,
+        platform_message_id: messageIdFor(e.platform_user_id, text, at),
+        username: e.username ?? (typeof info?.ig_username === "string" ? info.ig_username : null),
+        display_name: e.display_name ?? (typeof info?.name === "string" ? info.name : null),
+        email: e.email ?? (typeof info?.email === "string" && info.email ? info.email : null),
+      });
+    }
+    return { inbound, echoes: parsed.echoes };
+  }
+
+  private async getSubscriberInfo(subscriberId: string): Promise<Record<string, unknown> | null> {
+    if (!this.cfg.apiKey) throw new Error("MANYCHAT_API_KEY not configured");
+    const url = `${this.cfg.baseUrl ?? "https://api.manychat.com"}/fb/subscriber/getInfo?subscriber_id=${encodeURIComponent(subscriberId)}`;
+    const res = await this.fetchImpl(url, { headers: { authorization: `Bearer ${this.cfg.apiKey}`, accept: "application/json" } });
+    if (!res.ok) throw new Error(`manychat getInfo failed: HTTP ${res.status}`);
+    const body = (await res.json()) as { status?: string; data?: Record<string, unknown> };
+    return body.data ?? null;
   }
 
   async sendMessage(lead: Lead, text: string, _idempotencyKey: string) {
@@ -76,4 +107,32 @@ export class ManyChatProvider implements MessagingProvider {
     // ManyChat doesn't return a message id; use a deterministic local one.
     return { providerMessageId: `mc_out_${sha256(`${lead.platform_user_id}|${text}|${Date.now()}`).slice(0, 24)}` };
   }
+}
+
+/** Stable id for a ManyChat message (ManyChat doesn't send one): contact + text + minute. */
+function messageIdFor(subscriber: string, text: string, at: string): string {
+  return `mc_${sha256(`${subscriber}|${text}|${at.slice(0, 16)}`).slice(0, 32)}`;
+}
+
+/**
+ * ManyChat's body editor makes it easy to end up with slightly broken JSON (doubled quotes from
+ * to_json, extra closing braces). Try strict JSON first, then fall back to pulling out the fields.
+ */
+export function lenientParse(raw: string): Record<string, unknown> {
+  try {
+    const v = JSON.parse(raw);
+    if (v && typeof v === "object") return v as Record<string, unknown>;
+  } catch {
+    /* fall through */
+  }
+  const trimmed = raw.trim().replace(/\}+\s*$/, "}");
+  try {
+    const v = JSON.parse(trimmed);
+    if (v && typeof v === "object") return v as Record<string, unknown>;
+  } catch {
+    /* fall through */
+  }
+  const id = /"subscriber_id"\s*:\s*"*\s*([0-9A-Za-z_-]+)/.exec(raw)?.[1];
+  // Text is NOT extracted from broken JSON (it may contain quotes) — enrich() looks it up instead.
+  return id ? { subscriber_id: id } : {};
 }
