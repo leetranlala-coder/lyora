@@ -18,6 +18,7 @@ import { CalendlyBookingProvider } from "./integrations/booking/provider.js";
 import { LyoraAgent } from "./pipeline/agent.js";
 import { AdminActions } from "./pipeline/admin.js";
 import { importBacklogConversation } from "./pipeline/backlog.js";
+import { importStudentsCsv, localDate, reminderText, summarise, type Student } from "./pipeline/students.js";
 import { settingsFrom } from "./pipeline/context.js";
 import { recordBooking, recordPayment } from "./pipeline/outcomes.js";
 import { computeMetrics, todaySummary } from "./analytics/metrics.js";
@@ -85,18 +86,25 @@ export function buildApp(opts: { cfg?: AppConfig; clock?: Clock; scheduler?: Sch
 
   const inbound = (provider: MessagingProvider) => async (req: Req): Promise<Res> => {
     let parsed: ParsedWebhook;
+    // Every call is noted (without message content) so the dashboard can show whether DMs are arriving.
+    const note = (event: string, data: Record<string, unknown>) =>
+      repos.audit.write({ stage: "webhook", event, data: { provider: provider.name, ...data }, actor: "system", now: clock.now().toISOString() });
     try {
       parsed = provider.parseWebhook(req.headers, req.rawBody);
       if (provider.enrich) parsed = await provider.enrich(parsed);
     } catch (err) {
       if (err instanceof WebhookAuthError) {
         log.warn("webhook rejected", { provider: provider.name, reason: err.message });
+        note("rejected", { reason: err.message });
         return text("unauthorized", 401);
       }
       log.error("inbound webhook failed", { provider: provider.name, err });
+      note("failed", { reason: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300) });
       return text("bad request", 400);
     }
     const { leadIds, duplicates } = agent.ingestWebhook(parsed);
+    const empty = parsed.inbound.filter((m) => !m.text?.trim()).length;
+    note("received", { messages: parsed.inbound.length, accepted: leadIds.length, duplicates, empty_text: empty });
     scheduleReply(leadIds);
     return json({ ok: true, accepted: leadIds.length, duplicates });
   };
@@ -163,7 +171,18 @@ export function buildApp(opts: { cfg?: AppConfig; clock?: Clock; scheduler?: Sch
       const drafts = draftBatches()
         .map((b) => ({ lead: repos.leads.get(b[0]!.lead_id)!, count: b.length, batch: b[0]!.batch_id }))
         .filter((d) => d.lead);
-      return page("today", "today", V.todayPage(s as unknown as Record<string, number | string>, drafts, repos.leads.unresolvedHandoffs().slice(0, 10)));
+      const sums = studentSummaries();
+      return page(
+        "today",
+        "today",
+        V.todayPage(s as unknown as Record<string, number | string>, drafts, repos.leads.unresolvedHandoffs().slice(0, 10), {
+          connection: cfg.MESSAGING_PROVIDER === "mock" ? "" : V.connectionCard(repos.audit.latest("webhook", 20), cfg.MESSAGING_PROVIDER),
+          payments: V.latePaymentsSection(
+            sums.filter((x) => x.state === "late"),
+            sums.filter((x) => x.state === "due_soon"),
+          ),
+        }),
+      );
     }),
   );
   router.get("/admin/leads", guard((req) => page("leads", "leads", V.leadsPage(repos.leads.list({ search: req.query.get("q") || undefined, temperature: req.query.get("temp") || undefined }), req.query.get("q") ?? "", req.query.get("temp") ?? ""))));
@@ -288,10 +307,160 @@ export function buildApp(opts: { cfg?: AppConfig; clock?: Clock; scheduler?: Sch
   router.get("/admin/products", guard(() => page("products", "products", V.productsPage(repos.products.all(), repos.stock.all()))));
   router.get("/admin/purchases", guard(() => page("purchases", "purchases", V.purchasesPage(repos.purchases.unmatched(), repos.purchases.all(), repos.leads.list({ limit: 300 })))));
   router.post("/admin/purchases/:id/match", guard((req) => (admin.matchPurchase(req.params.id!, req.form.get("lead_id") ?? ""), redirect("/admin/purchases"))));
+  // ---------------------------------------------------------------- students & payments
+  const today = () => localDate(clock.now(), cfg.BUSINESS_TIMEZONE);
+  const nowIso = () => clock.now().toISOString();
+  const studentSummaries = () => {
+    const t = today();
+    return repos.students.all().map((s) => summarise(repos.students, s, t));
+  };
+  const num = (v: string | null | undefined) => {
+    const n = Number(String(v ?? "").replace(/[$,\s]/g, ""));
+    return v && String(v).trim() && Number.isFinite(n) ? n : null;
+  };
+  const isDate = (v: string | null | undefined): v is string => Boolean(v && /^\d{4}-\d{2}-\d{2}$/.test(v));
+  const studentFields = (f: URLSearchParams): Partial<Student> & { name: string } => ({
+    name: (f.get("name") ?? "").trim(),
+    email: f.get("email")?.trim().toLowerCase() || null,
+    phone: f.get("phone")?.trim() || null,
+    instagram: f.get("instagram")?.trim().replace(/^@/, "") || null,
+    package: f.get("package")?.trim() || null,
+    agreed_total: num(f.get("agreed_total")),
+    training_dates: f.get("training_dates")?.trim() || null,
+    notes: f.get("notes")?.trim() || null,
+    ...(f.get("status") ? { status: f.get("status") as Student["status"] } : {}),
+  });
+  const audit = (event: string, data: unknown) => repos.audit.write({ stage: "admin", event, data, actor: "human", now: nowIso() });
+  const toStudent = (id: string, flash: string) => redirect(`/admin/students/${encodeURIComponent(id)}?flash=${encodeURIComponent(flash)}`);
+
+  router.get(
+    "/admin/students",
+    guard((req) => {
+      const show = req.query.get("show") ?? "";
+      const all = studentSummaries();
+      const rows = all
+        .filter((s) => (show === "late" ? s.state === "late" : show === "owing" ? (s.owed ?? 1) > 0 && s.state !== "cancelled" : show === "paid" ? s.state === "paid" : true))
+        .sort((a, b) => Number(b.state === "late") - Number(a.state === "late") || b.overdue - a.overdue);
+      const live = all.filter((s) => s.state !== "cancelled");
+      const totals = {
+        owed: live.reduce((a, s) => a + (s.owed ?? 0), 0),
+        overdue: live.reduce((a, s) => a + s.overdue, 0),
+        paid: all.reduce((a, s) => a + s.paid, 0),
+      };
+      return page("students", "students", V.studentsPage(rows, totals, show), req.query.get("flash") ?? undefined);
+    }),
+  );
+  router.get("/admin/students/new", guard(() => page("add a student", "students", V.studentForm())));
+  router.post(
+    "/admin/students/new",
+    guard((req) => {
+      const f = studentFields(req.form);
+      if (!f.name) return page("add a student", "students", V.studentForm(f, "a name is needed"));
+      const s = repos.students.create(f, nowIso());
+      audit("student_created", { student_id: s.id });
+      return toStudent(s.id, "student added ✓ now add the due dates");
+    }),
+  );
+  router.get("/admin/students/import", guard(() => page("import", "students", V.importStudentsPage())));
+  router.post(
+    "/admin/students/import",
+    guard((req) => {
+      try {
+        const r = importStudentsCsv(repos.students, req.form.get("csv") ?? "", clock.now(), cfg.BUSINESS_TIMEZONE);
+        audit("students_imported", { created: r.created, updated: r.updated });
+        return page("import", "students", V.importStudentsPage(r));
+      } catch (err) {
+        return page("import", "students", V.importStudentsPage(undefined, err instanceof Error ? err.message : String(err)));
+      }
+    }),
+  );
+  const withStudent = (fn: (s: Student, req: Req) => Res | Promise<Res>) =>
+    guard((req: Req) => {
+      const s = repos.students.get(req.params.id!);
+      return s ? fn(s, req) : text("not found", 404);
+    });
+  router.get(
+    "/admin/students/:id",
+    withStudent((s, req) => {
+      const sum = summarise(repos.students, s, today());
+      return page(s.name, "students", V.studentPage(sum, repos.students.payments(s.id), repos.students.instalments(s.id), reminderText(sum), today()), req.query.get("flash") ?? undefined);
+    }),
+  );
+  router.get("/admin/students/:id/edit", withStudent((s) => page("edit", "students", V.studentForm(s))));
+  router.post(
+    "/admin/students/:id/edit",
+    withStudent((s, req) => {
+      const f = studentFields(req.form);
+      if (!f.name) return page("edit", "students", V.studentForm({ ...s, ...f }, "a name is needed"));
+      repos.students.update(s.id, f, nowIso());
+      audit("student_updated", { student_id: s.id });
+      return toStudent(s.id, "saved ✓");
+    }),
+  );
+  router.post(
+    "/admin/students/:id/payments",
+    withStudent((s, req) => {
+      const amount = num(req.form.get("amount"));
+      const paidAt = req.form.get("paid_at");
+      if (!amount || amount <= 0 || !isDate(paidAt)) return toStudent(s.id, "that payment needs an amount and a date");
+      repos.students.addPayment({ student_id: s.id, amount, paid_at: paidAt, method: req.form.get("method") || null, note: req.form.get("note")?.trim() || null }, nowIso());
+      audit("student_payment_recorded", { student_id: s.id, amount });
+      return toStudent(s.id, "payment saved ✓");
+    }),
+  );
+  router.post(
+    "/admin/students/:id/payments/:pid/delete",
+    withStudent((s, req) => {
+      repos.students.deletePayment(req.params.pid!, s.id);
+      audit("student_payment_removed", { student_id: s.id });
+      return toStudent(s.id, "payment removed");
+    }),
+  );
+  router.post(
+    "/admin/students/:id/instalments",
+    withStudent((s, req) => {
+      const amount = num(req.form.get("amount"));
+      const due = req.form.get("due_date");
+      if (!amount || amount <= 0 || !isDate(due)) return toStudent(s.id, "a due date needs an amount and a date");
+      repos.students.addInstalment({ student_id: s.id, due_date: due, amount, note: req.form.get("note")?.trim() || null }, nowIso());
+      return toStudent(s.id, "due date added ✓");
+    }),
+  );
+  router.post(
+    "/admin/students/:id/instalments/plan",
+    withStudent((s, req) => {
+      const amount = num(req.form.get("amount"));
+      const count = Math.min(52, Math.max(0, Math.floor(num(req.form.get("count")) ?? 0)));
+      const start = req.form.get("start");
+      const every = req.form.get("every");
+      if (!amount || amount <= 0 || !count || !isDate(start)) return toStudent(s.id, "the plan needs how many, an amount and a start date");
+      const [y, m, d] = start.split("-").map(Number) as [number, number, number];
+      for (let i = 0; i < count; i++) {
+        const dt =
+          every === "week" ? new Date(Date.UTC(y, m - 1, d + 7 * i)) : every === "fortnight" ? new Date(Date.UTC(y, m - 1, d + 14 * i)) : monthly(y, m - 1, d, i);
+        repos.students.addInstalment({ student_id: s.id, due_date: dt.toISOString().slice(0, 10), amount, note: `payment ${i + 1} of ${count}` }, nowIso());
+      }
+      return toStudent(s.id, `${count} due dates added ✓`);
+    }),
+  );
+  router.post(
+    "/admin/students/:id/instalments/:iid/delete",
+    withStudent((s, req) => {
+      repos.students.deleteInstalment(req.params.iid!, s.id);
+      return toStudent(s.id, "due date removed");
+    }),
+  );
+
   router.get("/", () => redirect("/admin"));
 
   // ---------------------------------------------------------------- periodic safety check (in-process)
   scheduler.every("safety-check", cfg.MESSAGE_CHECK_INTERVAL_MINUTES * 60_000, () => agent.tick());
 
   return { cfg, repos, agent, admin, router, scheduler, messaging };
+}
+
+/** Same day-of-month, clamped to the month's last day (31 jan + 1 month = 28/29 feb). */
+function monthly(y: number, m: number, d: number, add: number): Date {
+  const last = new Date(Date.UTC(y, m + add + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m + add, Math.min(d, last)));
 }

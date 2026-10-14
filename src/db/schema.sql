@@ -234,6 +234,44 @@ CREATE TABLE IF NOT EXISTS webhook_events (
   UNIQUE (provider, event_id)
 );
 
+-- ------------------------------------------------------------- students / payments
+-- Students who've enrolled in training/courses with a custom total or payment arrangement.
+CREATE TABLE IF NOT EXISTS students (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  instagram TEXT,
+  lead_id TEXT,
+  package TEXT,                           -- e.g. "LUXE Foundations", "online course + kit"
+  agreed_total REAL,                      -- NULL = never written down (flagged)
+  currency TEXT NOT NULL DEFAULT 'AUD',
+  training_dates TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'active',  -- active | completed | cancelled
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS student_payments (
+  id TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL REFERENCES students(id),
+  amount REAL NOT NULL,
+  paid_at TEXT NOT NULL,                  -- YYYY-MM-DD
+  method TEXT,                            -- bank transfer | cash | kajabi | square | imported
+  note TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS student_instalments (
+  id TEXT PRIMARY KEY,
+  student_id TEXT NOT NULL REFERENCES students(id),
+  due_date TEXT NOT NULL,                 -- YYYY-MM-DD
+  amount REAL NOT NULL,
+  note TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_student_payments ON student_payments(student_id);
+CREATE INDEX IF NOT EXISTS idx_student_instalments ON student_instalments(student_id, due_date);
+
 -- ------------------------------------------------------------------ audit
 CREATE TABLE IF NOT EXISTS audit_log (
   id TEXT PRIMARY KEY,

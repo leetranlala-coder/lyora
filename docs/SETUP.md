@@ -133,3 +133,22 @@ Instagram only allows automated replies within 24 hours of a lead's last message
 3. Copy each bubble into her Instagram chat yourself, then click **i've sent it**.
 
 Backlog drafts are never sent automatically and never get automated follow-ups. If she replies and it comes through ManyChat, the system recognises her by her handle and carries on with the full history.
+
+## Students & payments
+
+**students** in the dashboard tracks each student's agreed total, the payments that have come in, the due dates and who's late.
+
+- **import spreadsheet:** export your student checklist as CSV (File → Download → CSV) and upload it. It reads Student, Email, Agreed total, Paid, Training dates and Do next. Re-importing updates the same students (matched by email, then name) and never double-counts payments. The data stays on your server and is never committed to git.
+- **due dates:** on a student's page, add them one by one, or add a whole plan at once ("8 payments of $250 every month starting …").
+- **record a payment** whenever money comes in. Payments are applied to the oldest due date first.
+- **late** = a due date has passed and isn't covered yet. Late and due-this-week students show on **today**.
+- Each student page has a gentle **reminder** written in your voice with the exact amount and date. Copy it, edit it if you want, and send it yourself. Nothing is ever sent from here, and no bank details are stored.
+
+## Is Instagram connected?
+
+The **today** page shows the last time ManyChat reached the dashboard:
+
+- **connected ✓**: messages are arriving.
+- **no messages yet**: ManyChat isn't calling the dashboard. Check the Default Reply is **Live** and has the External Request step, and send a test DM from a different account. A DM that matches one of your keyword flows won't come here.
+- **secret doesn't match**: the `X-Lyora-Secret` header must be exactly `MANYCHAT_WEBHOOK_SECRET`.
+- **arrived but empty** or **couldn't be read**: add or check `MANYCHAT_API_KEY` in Render.

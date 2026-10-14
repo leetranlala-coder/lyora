@@ -1,3 +1,4 @@
+import { StudentRepository } from "../pipeline/students.js";
 import type { DB } from "./database.js";
 import { tx } from "./database.js";
 import { newId } from "../util/ids.js";
@@ -848,6 +849,14 @@ export class AuditRepository {
       .prepare("SELECT * FROM audit_log WHERE lead_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?")
       .all(leadId, limit) as Row[];
   }
+  /** Most recent entries for one stage (e.g. "webhook"), newest first. */
+  latest(stage: string, limit = 10): { event: string; data: Record<string, unknown> | null; created_at: string }[] {
+    return (this.db.prepare("SELECT event, data_json, created_at FROM audit_log WHERE stage = ? ORDER BY created_at DESC, rowid DESC LIMIT ?").all(stage, limit) as Row[]).map((r) => ({
+      event: String(r.event),
+      data: r.data_json ? (JSON.parse(String(r.data_json)) as Record<string, unknown>) : null,
+      created_at: String(r.created_at),
+    }));
+  }
 }
 
 export interface Repos {
@@ -867,6 +876,7 @@ export interface Repos {
   locks: LockRepository;
   webhookEvents: WebhookEventRepository;
   audit: AuditRepository;
+  students: StudentRepository;
 }
 
 export function createRepos(db: DB): Repos {
@@ -887,5 +897,6 @@ export function createRepos(db: DB): Repos {
     locks: new LockRepository(db),
     webhookEvents: new WebhookEventRepository(db),
     audit: new AuditRepository(db),
+    students: new StudentRepository(db),
   };
 }

@@ -64,7 +64,7 @@ export function layout(title: string, active: string, body: string, opts: { mode
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
 <style>${CSS}</style></head><body>
 <header class="top"><a class="brand" href="/admin">LYORA</a>
-<nav>${link("/admin", "today")}${link("/admin/leads", "leads")}${link("/admin/drafts", "drafts")}${link("/admin/backlog", "backlog")}${link("/admin/handoffs", "handoffs")}${link("/admin/analytics", "analytics")}${link("/admin/products", "products")}${link("/admin/purchases", "purchases")}</nav>
+<nav>${link("/admin", "today")}${link("/admin/leads", "leads")}${link("/admin/drafts", "drafts")}${link("/admin/backlog", "backlog")}${link("/admin/students", "students")}${link("/admin/handoffs", "handoffs")}${link("/admin/analytics", "analytics")}${link("/admin/products", "products")}${link("/admin/purchases", "purchases")}</nav>
 <span class="mode ${opts.mode === "auto" ? "auto" : ""}">${opts.mode === "auto" ? "auto send on" : "draft mode"}</span></header>
 <main>${opts.flash ? `<div class="flash">${esc(opts.flash)}</div>` : ""}${body}</main></body></html>`;
 }
@@ -78,15 +78,21 @@ const temp = (t: string) => `<span class="pill t-${esc(t)}">${esc(t.replace("_",
 const name = (l: Lead) => esc(l.display_name || (l.username ? "@" + l.username : l.platform_user_id));
 const money = (n: number) => `$${n.toLocaleString("en-AU", { maximumFractionDigits: 2 })}`;
 
-export function todayPage(s: Record<string, number | string>, drafts: { lead: Lead; count: number; batch: string }[], handoffs: Lead[]) {
+export function todayPage(
+  s: Record<string, number | string>,
+  drafts: { lead: Lead; count: number; batch: string }[],
+  handoffs: Lead[],
+  extra: { connection?: string; payments?: string } = {},
+) {
   const stat = (v: unknown, label: string) => `<div class="stat"><b>${esc(v)}</b><span>${label}</span></div>`;
   return `<h1>today</h1><p class="sub">perth time · since ${esc(when(String(s.from)))}</p>
-<div class="grid">
+${extra.connection ?? ""}<div class="grid">
 ${stat(s.new_leads, "new leads")}${stat(s.replies_sent, "replies sent")}${stat(s.drafts_waiting, "drafts waiting")}
 ${stat(s.cold, "cold")}${stat(s.warm, "warm")}${stat(s.hot, "hot")}${stat(s.very_hot, "very hot")}
 ${stat(s.open_handoffs, "handoffs open")}${stat(s.calls_booked, "calls booked")}${stat(s.purchases, "purchases")}
 ${stat(money(Number(s.revenue)), "revenue")}${stat(money(Number(s.ai_assisted_revenue)), "ai-assisted revenue")}${stat(s.follow_ups_due, "follow-ups next 24h")}
 </div>
+${extra.payments ?? ""}
 <h2>needs you</h2>
 ${handoffs.length ? leadTable(handoffs, true) : `<p class="muted">nothing waiting on you 🤍</p>`}
 <h2>drafts to review</h2>
@@ -313,4 +319,184 @@ ${form.error ? `<p style="color:var(--bad)">${esc(form.error)}</p>` : ""}
           .join("")
       : '<p class="muted">nothing waiting</p>'
   }`;
+}
+
+// ---------------------------------------------------------------- connection + students
+export type WebhookLogEntry = { event: string; data: Record<string, unknown> | null; created_at: string };
+
+export function connectionCard(log: WebhookLogEntry[], provider: string) {
+  const last = log[0];
+  const lastOk = log.find((e) => e.event === "received");
+  const reason = String(last?.data?.reason ?? "");
+  let line: string;
+  if (!last) {
+    line = `<b>no messages from ${esc(provider)} yet.</b> send a test DM from another account. if nothing shows here within a minute, the ManyChat Default Reply isn't reaching this dashboard (check it's <i>live</i> and has the External Request step).`;
+  } else if (last.event === "rejected") {
+    line = `<b style="color:var(--bad)">ManyChat is reaching the dashboard but the secret doesn't match.</b> the <code>X-Lyora-Secret</code> header in the External Request must be exactly the same as <code>MANYCHAT_WEBHOOK_SECRET</code> in Render. <span class="muted small">(${esc(when(last.created_at))})</span>`;
+  } else if (last.event === "failed") {
+    line = `<b style="color:var(--bad)">the last message couldn't be read:</b> ${esc(reason)} <span class="muted small">(${esc(when(last.created_at))})</span>${/api|key|401|403|getinfo|subscriber/i.test(reason) ? "<br><span class=\"small\">check <code>MANYCHAT_API_KEY</code> in Render (ManyChat → settings → API).</span>" : ""}`;
+  } else if (Number(last.data?.empty_text ?? 0) > 0 && Number(last.data?.accepted ?? 0) === 0) {
+    line = `<b style="color:var(--warn)">a message arrived but it was empty.</b> usually <code>MANYCHAT_API_KEY</code> is missing in Render, so the message text can't be looked up. <span class="muted small">(${esc(when(last.created_at))})</span>`;
+  } else {
+    line = `<b style="color:var(--ok)">connected ✓</b> last message from ${esc(provider)} ${esc(when(last.created_at))}`;
+  }
+  return `<div class="card small">${line}${lastOk && last !== lastOk ? `<br><span class="muted">last good message: ${esc(when(lastOk.created_at))}</span>` : ""}</div>`;
+}
+
+type Sum = import("../pipeline/students.js").StudentSummary;
+const STATE: Record<Sum["state"], string> = {
+  paid: "paid in full",
+  late: "late",
+  due_soon: "due this week",
+  on_track: "on track",
+  no_total: "total not set",
+  no_plan: "no due dates",
+  cancelled: "cancelled",
+  completed: "completed",
+};
+const statePill = (s: Sum["state"]) =>
+  `<span class="pill ${s === "late" ? "p-urgent" : s === "due_soon" || s === "no_total" ? "p-high" : s === "paid" ? "" : ""}">${STATE[s]}</span>`;
+const owedCell = (s: Sum) => (s.owed === null ? '<span class="muted">?</span>' : money(s.owed));
+const nice = (iso: string) => {
+  const d = new Date(iso + "T00:00:00Z");
+  return new Intl.DateTimeFormat("en-AU", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" }).format(d).toLowerCase();
+};
+
+export function latePaymentsSection(late: Sum[], dueSoon: Sum[]) {
+  if (!late.length && !dueSoon.length) return "";
+  const row = (s: Sum) =>
+    `<tr><td><a href="/admin/students/${esc(s.student.id)}">${esc(s.student.name)}</a></td><td>${statePill(s.state)}</td><td>${s.overdue > 0 ? money(s.overdue) + ` <span class="muted small">since ${esc(nice(s.oldest_overdue_date!))}</span>` : s.next_due ? `${money(s.next_due.amount)} <span class="muted small">on ${esc(nice(s.next_due.date))}</span>` : ""}</td><td>${owedCell(s)}</td></tr>`;
+  return `<h2>payments</h2><table><tr><th>student</th><th></th><th>due</th><th>still owed</th></tr>${[...late, ...dueSoon].map(row).join("")}</table>`;
+}
+
+export function studentsPage(rows: Sum[], totals: { owed: number; overdue: number; paid: number }, filter: string) {
+  const f = (v: string, label: string) => `<a href="/admin/students${v ? `?show=${v}` : ""}" class="pill" style="text-decoration:none;${filter === v ? "background:var(--espresso);color:var(--cream)" : ""}">${label}</a>`;
+  return `<h1>students</h1><p class="sub">what everyone agreed to, what's come in, and who's late.</p>
+<div class="grid">
+<div class="stat"><b>${money(totals.overdue)}</b><span>overdue now</span></div>
+<div class="stat"><b>${money(totals.owed)}</b><span>still owed in total</span></div>
+<div class="stat"><b>${money(totals.paid)}</b><span>received</span></div>
+<div class="stat"><b>${rows.filter((r) => r.state === "late").length}</b><span>late</span></div>
+</div>
+<p style="margin:22px 0 12px">${f("", "everyone")} ${f("owing", "still owing")} ${f("late", "late")} ${f("paid", "paid in full")}
+<a class="btn" style="float:right" href="/admin/students/new">add a student</a><a class="btn ghost" style="float:right" href="/admin/students/import">import spreadsheet</a></p>
+${
+  rows.length
+    ? `<table><tr><th>student</th><th>package</th><th>agreed</th><th>paid</th><th>still owed</th><th>next due</th><th></th></tr>${rows
+        .map(
+          (s) => `<tr><td><a href="/admin/students/${esc(s.student.id)}">${esc(s.student.name)}</a>${s.student.training_dates ? `<br><span class="muted small">${esc(s.student.training_dates)}</span>` : ""}</td>
+<td>${esc(s.student.package ?? "")}</td><td>${s.student.agreed_total === null ? '<span class="muted">not set</span>' : money(s.student.agreed_total)}</td><td>${money(s.paid)}</td><td>${owedCell(s)}</td>
+<td>${s.overdue > 0 ? `<b style="color:var(--bad)">${money(s.overdue)} overdue</b>` : s.next_due ? `${money(s.next_due.amount)} · ${esc(nice(s.next_due.date))}` : '<span class="muted">—</span>'}</td><td>${statePill(s.state)}</td></tr>`,
+        )
+        .join("")}</table>`
+    : `<p class="muted">no students here yet. add one, or import your checklist spreadsheet.</p>`
+}`;
+}
+
+const field = (label: string, nameAttr: string, value: string | number | null | undefined, opts: { type?: string; placeholder?: string; step?: string } = {}) =>
+  `<p><label class="small muted">${label}</label><br><input name="${nameAttr}" type="${opts.type ?? "text"}" ${opts.step ? `step="${opts.step}"` : ""} value="${esc(value ?? "")}" placeholder="${esc(opts.placeholder ?? "")}" style="width:100%;max-width:420px"></p>`;
+
+export function studentForm(s: Partial<import("../pipeline/students.js").Student> = {}, error?: string) {
+  const editing = Boolean(s.id);
+  return `<h1>${editing ? "edit student" : "add a student"}</h1><div class="card">${error ? `<p style="color:var(--bad)">${esc(error)}</p>` : ""}
+<form method="post" action="${editing ? `/admin/students/${esc(s.id!)}/edit` : "/admin/students/new"}">
+${field("name", "name", s.name, { placeholder: "jess smith" })}
+${field("email", "email", s.email, { type: "email" })}
+${field("phone", "phone", s.phone)}
+${field("instagram", "instagram", s.instagram, { placeholder: "@handle" })}
+${field("package", "package", s.package, { placeholder: "LUXE foundations · VIP + kit" })}
+${field("agreed total ($)", "agreed_total", s.agreed_total, { type: "number", step: "0.01", placeholder: "leave empty if not agreed yet" })}
+${field("training dates", "training_dates", s.training_dates, { placeholder: "18 oct + 19 oct" })}
+<p><label class="small muted">notes</label><br><textarea name="notes" rows="3">${esc(s.notes ?? "")}</textarea></p>
+${editing ? `<p><label class="small muted">status</label><br><select name="status">${["active", "completed", "cancelled"].map((v) => `<option ${s.status === v ? "selected" : ""}>${v}</option>`).join("")}</select></p>` : ""}
+<button>${editing ? "save" : "add student"}</button> <a href="${editing ? `/admin/students/${esc(s.id!)}` : "/admin/students"}" class="btn ghost">cancel</a></form></div>`;
+}
+
+export function studentPage(
+  sum: Sum,
+  payments: import("../pipeline/students.js").StudentPayment[],
+  instalments: import("../pipeline/students.js").Instalment[],
+  reminder: string,
+  today: string,
+) {
+  const s = sum.student;
+  // which instalments are covered, oldest first
+  let credit = sum.paid;
+  const plan = instalments.map((i) => {
+    const covered = Math.min(credit, i.amount);
+    credit -= covered;
+    const left = Math.round((i.amount - covered) * 100) / 100;
+    return { i, state: left <= 0 ? "paid" : i.due_date < today ? "late" : covered > 0 ? "part paid" : "upcoming", left };
+  });
+  return `<p class="small"><a href="/admin/students">← students</a></p>
+<h1>${esc(s.name)}</h1><p class="sub">${esc(s.package ?? "")}${s.training_dates ? ` · ${esc(s.training_dates)}` : ""} · ${statePill(sum.state)}</p>
+<div class="grid">
+<div class="stat"><b>${s.agreed_total === null ? "?" : money(s.agreed_total)}</b><span>agreed</span></div>
+<div class="stat"><b>${money(sum.paid)}</b><span>paid</span></div>
+<div class="stat"><b>${sum.owed === null ? "?" : money(sum.owed)}</b><span>still owed</span></div>
+<div class="stat"><b style="${sum.overdue > 0 ? "color:var(--bad)" : ""}">${money(sum.overdue)}</b><span>overdue</span></div>
+</div>
+<div class="cols" style="margin-top:28px"><div>
+<h2>payment plan</h2>
+${
+  plan.length
+    ? `<table><tr><th>due</th><th>amount</th><th></th><th></th></tr>${plan
+        .map(
+          ({ i, state, left }) => `<tr><td>${esc(nice(i.due_date))}${i.note ? `<br><span class="muted small">${esc(i.note)}</span>` : ""}</td><td>${money(i.amount)}${state === "part paid" || (state === "late" && left < i.amount) ? ` <span class="muted small">(${money(left)} left)</span>` : ""}</td>
+<td><span class="pill ${state === "late" ? "p-urgent" : ""}">${state}</span></td><td><form class="inline" method="post" action="/admin/students/${esc(s.id)}/instalments/${esc(i.id)}/delete"><button class="ghost small" title="remove">×</button></form></td></tr>`,
+        )
+        .join("")}</table>`
+    : `<p class="muted">no due dates yet. add them below so the dashboard can tell you when someone's late.</p>`
+}
+<div class="card" style="margin-top:14px"><form method="post" action="/admin/students/${esc(s.id)}/instalments">
+<b class="small">add a due date</b><br>
+<input name="due_date" type="date" required> <input name="amount" type="number" step="0.01" placeholder="amount" required style="width:120px"> <input name="note" placeholder="note (optional)"> <button>add</button></form>
+<details style="margin-top:10px"><summary>add several at once (weekly / fortnightly / monthly)</summary>
+<form method="post" action="/admin/students/${esc(s.id)}/instalments/plan" style="margin-top:10px">
+<input name="count" type="number" min="1" max="52" placeholder="how many" required style="width:110px"> payments of <input name="amount" type="number" step="0.01" placeholder="amount" required style="width:110px">
+every <select name="every"><option value="week">week</option><option value="fortnight">fortnight</option><option value="month" selected>month</option></select>
+starting <input name="start" type="date" required> <button>add plan</button></form></details></div>
+
+<h2>payments received</h2>
+${
+  payments.length
+    ? `<table><tr><th>date</th><th>amount</th><th>how</th><th></th></tr>${payments
+        .map(
+          (p) => `<tr><td>${esc(nice(p.paid_at))}</td><td>${money(p.amount)}</td><td>${esc(p.method ?? "")}${p.note ? `<br><span class="muted small">${esc(p.note)}</span>` : ""}</td>
+<td><form class="inline" method="post" action="/admin/students/${esc(s.id)}/payments/${esc(p.id)}/delete" onsubmit="return confirm('remove this payment?')"><button class="ghost small" title="remove">×</button></form></td></tr>`,
+        )
+        .join("")}</table>`
+    : `<p class="muted">nothing recorded yet</p>`
+}
+<div class="card" style="margin-top:14px"><form method="post" action="/admin/students/${esc(s.id)}/payments">
+<b class="small">record a payment</b><br>
+<input name="amount" type="number" step="0.01" placeholder="amount" required style="width:120px"> <input name="paid_at" type="date" value="${esc(today)}" required>
+<select name="method"><option>bank transfer</option><option>cash</option><option>kajabi</option><option>square</option><option>other</option></select>
+<input name="note" placeholder="note (optional)"> <button>save</button></form></div>
+</div><div>
+<h2>reminder</h2>
+<div class="card"><textarea id="reminder" rows="5">${esc(reminder)}</textarea>
+<button type="button" onclick="navigator.clipboard.writeText(document.getElementById('reminder').value);this.textContent='copied ✓'">copy</button>
+<p class="small muted">edit it however you like before sending. nothing is sent from here.</p></div>
+<h2>details</h2><div class="card"><dl>
+<dt>email</dt><dd>${s.email ? `<a href="mailto:${esc(s.email)}">${esc(s.email)}</a>` : '<span class="muted">—</span>'}</dd>
+<dt>phone</dt><dd>${esc(s.phone ?? "—")}</dd>
+<dt>instagram</dt><dd>${s.instagram ? `<a href="https://instagram.com/${esc(s.instagram)}" target="_blank" rel="noopener">@${esc(s.instagram)}</a>` : "—"}</dd>
+<dt>training</dt><dd>${esc(s.training_dates ?? "—")}</dd>
+<dt>status</dt><dd>${esc(s.status)}</dd>
+</dl>${s.notes ? `<p style="white-space:pre-wrap;margin-top:14px">${esc(s.notes)}</p>` : ""}
+<p><a class="btn ghost" href="/admin/students/${esc(s.id)}/edit">edit details</a></p></div>
+</div></div>`;
+}
+
+export function importStudentsPage(result?: { created: number; updated: number }, error?: string) {
+  return `<p class="small"><a href="/admin/students">← students</a></p><h1>import spreadsheet</h1>
+<p class="sub">bring in your student checklist so you don't have to type it all again.</p>
+<div class="card">${error ? `<p style="color:var(--bad)">${esc(error)}</p>` : ""}${result ? `<p class="flash">done ✓ ${result.created} added, ${result.updated} updated</p>` : ""}
+<ol class="small"><li>open your checklist in excel / google sheets / numbers</li><li>file → download / export as <b>CSV</b></li><li>choose that file below (or open it in notes and paste it in)</li></ol>
+<form method="post" action="/admin/students/import" id="imp">
+<p><input type="file" accept=".csv,text/csv" onchange="const f=this.files[0];if(f)f.text().then(t=>document.getElementById('csv').value=t)"></p>
+<p><textarea name="csv" id="csv" rows="10" placeholder="Student,Email,Agreed total ($),Paid ($),Training dates,Do next"></textarea></p>
+<p class="small muted">columns it understands: student / name, email, phone, instagram, package, agreed total, paid, training dates, do next / notes. running it again updates the same students (matched by email, then name). nothing leaves your dashboard.</p>
+<button>import</button></form></div>`;
 }
