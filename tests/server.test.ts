@@ -67,7 +67,7 @@ describe("http server", () => {
     const a = app();
     expect((await a.router.handle(req("GET", "/admin", { headers: { authorization: "" } }))).status).toBe(401);
     expect((await a.router.handle(req("POST", "/admin/leads/x/takeover", { headers: { origin: "https://evil.example" } }))).status).toBe(403);
-    for (const p of ["/admin", "/admin/leads", "/admin/drafts", "/admin/backlog", "/admin/handoffs", "/admin/analytics", "/admin/products", "/admin/purchases"]) {
+    for (const p of ["/admin", "/admin/leads", "/admin/drafts", "/admin/backlog", "/admin/handoffs", "/admin/analytics", "/admin/products", "/admin/purchases", "/admin/students"]) {
       expect((await a.router.handle(req("GET", p))).status).toBe(200);
     }
   });
@@ -98,5 +98,19 @@ describe("http server", () => {
     const a = app();
     expect((await a.router.handle(req("POST", "/webhooks/stripe", { body: "{}" }))).status).toBe(401);
     expect((await a.router.handle(req("POST", "/internal/tick"))).status).toBe(401);
+  });
+});
+
+describe("connection status", () => {
+  it("shows whether manychat messages are arriving", async () => {
+    const cfg = buildConfig({ DATABASE_PATH: ":memory:", ADMIN_PASSWORD: "pw", ADMIN_USERNAME: "lee", MESSAGING_PROVIDER: "manychat", MANYCHAT_WEBHOOK_SECRET: "s3cret", NODE_ENV: "test" });
+    const a = buildApp({ cfg, clock: new FakeClock(START), scheduler: new ManualScheduler() });
+    expect((await a.router.handle(req("GET", "/admin"))).body).toContain("no messages from manychat yet");
+    const bad = await a.router.handle(req("POST", "/webhooks/manychat", { body: JSON.stringify({ subscriber_id: "1", text: "hi" }), headers: { "x-lyora-secret": "wrong" } }));
+    expect(bad.status).toBe(401);
+    expect((await a.router.handle(req("GET", "/admin"))).body).toContain("secret doesn");
+    const ok = await a.router.handle(req("POST", "/webhooks/manychat", { body: JSON.stringify({ subscriber_id: "1", text: "hi there", username: "x" }), headers: { "x-lyora-secret": "s3cret" } }));
+    expect(ok.status).toBe(200);
+    expect((await a.router.handle(req("GET", "/admin"))).body).toContain("connected ✓");
   });
 });
