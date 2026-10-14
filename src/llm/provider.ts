@@ -64,6 +64,8 @@ export interface ResponseInput {
   conversation: Message[];
   facts: Fact[];
   followUpContext?: string;
+  /** Lee is replying to an older message from her backlog (she'll copy and send it herself). */
+  lateReply?: boolean;
   /** Feedback from a failed safety check, used on the single regeneration attempt. */
   previousIssues?: string[];
 }

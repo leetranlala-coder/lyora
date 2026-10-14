@@ -71,6 +71,11 @@ export function responseUserText(i: ResponseInput): string {
       `<follow_up>this is a follow-up: she hasn't replied since lee's last message. reference what she actually said earlier (${i.followUpContext ?? ""}). never write "just following up" or "just checking in". keep it to 1-2 bubbles and make it easy to reply or say no.</follow_up>`,
     );
   }
+  if (i.lateReply) {
+    parts.unshift(
+      `<late_reply>lee is answering this message late (it's from her backlog). a short, natural acknowledgement like "sorry lovely, only just seeing this" is fine, once, with no excuses. then respond to what she actually asked.</late_reply>`,
+    );
+  }
   if (i.previousIssues?.length) {
     parts.push(`<rejected_previous_draft_issues>\n${i.previousIssues.join("\n")}\nfix these.\n</rejected_previous_draft_issues>`);
   }

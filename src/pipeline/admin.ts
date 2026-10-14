@@ -103,6 +103,34 @@ export class AdminActions {
     return sendBatch(this.ctx, batchId, "human");
   }
 
+  /** Lee copied a backlog (manual) draft into Instagram herself: record it as her message. */
+  markCopiedDraftSent(batchId: string, edited?: string[]) {
+    const rows = this.ctx.repos.outbound.batch(batchId).filter((r) => r.status === "draft");
+    if (!rows.length) return;
+    const lead = this.ctx.repos.leads.get(rows[0]!.lead_id);
+    if (!lead) return;
+    const now = this.now();
+    rows.forEach((r, i) => {
+      const text = (edited?.[i] ?? r.content).trim();
+      if (!text) {
+        this.ctx.repos.outbound.update(r.id, { status: "discarded" });
+        return;
+      }
+      this.ctx.repos.outbound.update(r.id, { status: "sent", content: text, edited_by_human: text !== r.content, sent_at: now });
+      this.ctx.repos.messages.insertOutbound({
+        lead_id: lead.id,
+        platform: lead.platform,
+        platform_message_id: `manual-sent:${r.id}`,
+        content: text,
+        sender_type: "human",
+        outbound_message_id: r.id,
+        created_at: now,
+      });
+    });
+    this.ctx.repos.leads.update(lead.id, { last_outbound_message_at: now, first_response_at: lead.first_response_at ?? now, updated_at: now });
+    this.audit(lead.id, "backlog_draft_marked_sent", { batchId });
+  }
+
   discardDraft(batchId: string) {
     const rows = this.ctx.repos.outbound.batch(batchId);
     for (const r of rows) if (r.status !== "sent") this.ctx.repos.outbound.update(r.id, { status: "discarded" });

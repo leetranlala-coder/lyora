@@ -25,6 +25,7 @@ export async function sendBatch(ctx: AgentContext, batchId: string, actor: "agen
   if (!pending.length) return { status: "sent", sent: 0 };
   const lead = repos.leads.get(pending[0]!.lead_id);
   if (!lead) return { status: "blocked", reason: "lead not found" };
+  if (pending[0]!.trigger === "manual") return { status: "blocked", reason: "backlog drafts are copied and sent by lee in instagram" };
 
   const block = (reason: string, discard: boolean): SendOutcome => {
     if (discard) for (const r of pending) repos.outbound.update(r.id, { status: "discarded", error: reason });

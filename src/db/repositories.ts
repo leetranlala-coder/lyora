@@ -241,6 +241,20 @@ export class LeadRepository {
       });
       return this.get(existing.id)!;
     }
+    // A lead Lee added from her backlog (platform_user_id "manual:<handle>") becomes the real one
+    // the first time that person messages through the live channel.
+    if (input.username && !input.platform_user_id.startsWith("manual:")) {
+      const manual = this.findByPlatformUser(input.platform, `manual:${input.username.replace(/^@/, "").toLowerCase()}`);
+      if (manual) {
+        this.update(manual.id, {
+          platform_user_id: input.platform_user_id,
+          display_name: input.display_name ?? manual.display_name,
+          email: manual.email ?? input.email ?? null,
+          updated_at: input.now,
+        });
+        return this.get(manual.id)!;
+      }
+    }
     const id = newId();
     this.db
       .prepare(
@@ -706,7 +720,7 @@ export class OutboundRepository {
     lead_id: string;
     messages: string[];
     status: "draft" | "queued";
-    trigger: "reply" | "followup";
+    trigger: "reply" | "followup" | "manual";
     trigger_ref: string;
     decision_action: string;
     now: string;

@@ -64,7 +64,7 @@ export function layout(title: string, active: string, body: string, opts: { mode
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
 <style>${CSS}</style></head><body>
 <header class="top"><a class="brand" href="/admin">LYORA</a>
-<nav>${link("/admin", "today")}${link("/admin/leads", "leads")}${link("/admin/drafts", "drafts")}${link("/admin/handoffs", "handoffs")}${link("/admin/analytics", "analytics")}${link("/admin/products", "products")}${link("/admin/purchases", "purchases")}</nav>
+<nav>${link("/admin", "today")}${link("/admin/leads", "leads")}${link("/admin/drafts", "drafts")}${link("/admin/backlog", "backlog")}${link("/admin/handoffs", "handoffs")}${link("/admin/analytics", "analytics")}${link("/admin/products", "products")}${link("/admin/purchases", "purchases")}</nav>
 <span class="mode ${opts.mode === "auto" ? "auto" : ""}">${opts.mode === "auto" ? "auto send on" : "draft mode"}</span></header>
 <main>${opts.flash ? `<div class="flash">${esc(opts.flash)}</div>` : ""}${body}</main></body></html>`;
 }
@@ -135,6 +135,7 @@ export function leadPage(d: {
   const drafts = d.drafts
     .map((batch) => {
       const b = batch[0]!;
+      if (b.trigger === "manual") return copyDraft(batch);
       return `<div class="draft"><div class="small muted">draft · ${esc(b.decision_action ?? "")} · ${esc(b.trigger)} · ${esc(when(b.created_at))}</div>
 <form method="post" action="/admin/drafts/${esc(b.batch_id)}/approve">${batch
         .map((o) => `<textarea name="m" rows="2">${esc(o.content)}</textarea>`)
@@ -275,4 +276,41 @@ export function purchasesPage(unmatched: Purchase[], all: Purchase[], leads: Lea
         `<tr><td>${esc(when(p.purchased_at))}</td><td>${money(p.amount)}${p.is_payment_plan ? ' <span class="small muted">plan</span>' : ""}</td><td>${esc(p.product_id ?? "—")}</td><td>${esc(p.provider)}</td><td>${esc(p.status)}</td><td class="small">${esc(p.attribution ?? "—")}</td></tr>`,
     )
     .join("")}</table>`;
+}
+
+/** A backlog draft: Lee copies each bubble into Instagram herself, then marks it sent. */
+function copyDraft(batch: OutboundMessage[]) {
+  const b = batch[0]!;
+  return `<div class="draft"><div class="small muted">copy &amp; send yourself · ${esc((b.decision_action ?? "").toLowerCase().replace(/_/g, " "))} · ${esc(when(b.created_at))}</div>
+<form method="post" action="/admin/drafts/${esc(b.batch_id)}/mark-sent">${batch
+    .map(
+      (o, i) => `<textarea name="m" rows="2" id="cp-${esc(o.id)}">${esc(o.content)}</textarea>
+<button type="button" class="ghost" onclick="navigator.clipboard.writeText(document.getElementById('cp-${esc(o.id)}').value);this.textContent='copied ✓'">copy bubble ${i + 1}</button>`,
+    )
+    .join("")}
+<div class="small muted">paste each bubble into her instagram chat as its own message, then:</div><button>i've sent it</button></form>
+<form class="inline" method="post" action="/admin/drafts/${esc(b.batch_id)}/discard"><button class="ghost">discard</button></form></div>`;
+}
+
+export function backlogPage(recent: { lead: Lead; batch: OutboundMessage[] }[], form: { handle?: string; name?: string; text?: string; error?: string } = {}) {
+  return `<h1>backlog</h1><p class="sub">older DMs the ai can't answer automatically. paste the chat, get a reply in your voice, send it yourself in instagram.</p>
+<div class="card">
+${form.error ? `<p style="color:var(--bad)">${esc(form.error)}</p>` : ""}
+<form method="post" action="/admin/backlog">
+<p><label class="small muted">her instagram handle</label><br><input name="handle" value="${esc(form.handle ?? "")}" placeholder="@nailbabe" required style="width:100%;max-width:340px"></p>
+<p><label class="small muted">her name (optional)</label><br><input name="name" value="${esc(form.name ?? "")}" placeholder="jess" style="width:100%;max-width:340px"></p>
+<p><label class="small muted">the conversation</label><br>
+<textarea name="text" rows="10" placeholder="her: hi! how much is the course?&#10;me: hi lovely ...&#10;her: is there a payment plan?">${esc(form.text ?? "")}</textarea></p>
+<p class="small muted">start her lines with <b>her:</b> and yours with <b>me:</b>. if it's just her message(s), you can paste them as they are.</p>
+<button>write my reply</button></form></div>
+<h2>waiting for you to send</h2>${
+    recent.length
+      ? recent
+          .map(
+            ({ lead, batch }) =>
+              `<div class="card"><p><a href="/admin/leads/${esc(lead.id)}">${name(lead)}</a> <span class="muted small">${esc(when(batch[0]!.created_at))}</span></p>${copyDraft(batch)}</div>`,
+          )
+          .join("")
+      : '<p class="muted">nothing waiting</p>'
+  }`;
 }

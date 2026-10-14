@@ -17,6 +17,7 @@ import { KajabiPaymentProvider } from "./integrations/payments/kajabi.js";
 import { CalendlyBookingProvider } from "./integrations/booking/provider.js";
 import { LyoraAgent } from "./pipeline/agent.js";
 import { AdminActions } from "./pipeline/admin.js";
+import { importBacklogConversation } from "./pipeline/backlog.js";
 import { settingsFrom } from "./pipeline/context.js";
 import { recordBooking, recordPayment } from "./pipeline/outcomes.js";
 import { computeMetrics, todaySummary } from "./analytics/metrics.js";
@@ -235,6 +236,37 @@ export function buildApp(opts: { cfg?: AppConfig; clock?: Clock; scheduler?: Sch
       const flash = r.status === "sent" ? "sent ✓" : `not sent: ${"reason" in r ? r.reason : r.error}`;
       const leadId = repos.outbound.batch(req.params.batch!)[0]?.lead_id;
       return redirect(leadId ? `/admin/leads/${leadId}?flash=${encodeURIComponent(flash)}` : "/admin/drafts");
+    }),
+  );
+  router.post(
+    "/admin/drafts/:batch/mark-sent",
+    guard((req) => {
+      const leadId = repos.outbound.batch(req.params.batch!)[0]?.lead_id;
+      admin.markCopiedDraftSent(req.params.batch!, req.form.getAll("m"));
+      return redirect(req.headers.referer && new URL(req.headers.referer).pathname === "/admin/backlog" ? "/admin/backlog" : leadId ? `/admin/leads/${leadId}?flash=${encodeURIComponent("marked as sent ✓")}` : "/admin/backlog");
+    }),
+  );
+  const copyBatches = () => draftBatches().filter((b) => b[0]!.trigger === "manual").map((b) => ({ lead: repos.leads.get(b[0]!.lead_id)!, batch: b })).filter((r) => r.lead);
+  router.get("/admin/backlog", guard(() => page("backlog", "backlog", V.backlogPage(copyBatches()))));
+  router.post(
+    "/admin/backlog",
+    guard(async (req) => {
+      const form = { handle: req.form.get("handle") ?? "", name: req.form.get("name") ?? "", text: req.form.get("text") ?? "" };
+      try {
+        const r = await importBacklogConversation(agent, form);
+        const st = r.result.status;
+        const flash =
+          st === "done" && r.result.status === "done" && r.result.outcome === "copy_draft_created"
+            ? "reply written ✓ copy it below"
+            : st === "handoff" || (st === "done" && r.result.status === "done" && r.result.decision.action === "HUMAN_HANDOFF")
+              ? "this one needs you personally, see the handoff note"
+              : st === "no_new_messages"
+                ? "nothing new from her in that text"
+                : `no reply written (${st === "done" && r.result.status === "done" ? r.result.decision.action.toLowerCase().replace(/_/g, " ") : st})`;
+        return redirect(`/admin/leads/${encodeURIComponent(r.leadId)}?flash=${encodeURIComponent(flash)}#drafts`);
+      } catch (err) {
+        return page("backlog", "backlog", V.backlogPage(copyBatches(), { ...form, error: err instanceof Error ? err.message : String(err) }));
+      }
     }),
   );
   router.post("/admin/drafts/:batch/discard", guard((req) => (admin.discardDraft(req.params.batch!), back(req, "/admin/drafts"))));

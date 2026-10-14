@@ -123,3 +123,13 @@ npm ci && npm run build && npm start
 - **When very hot leads come to you:** `HIGH_TICKET_THRESHOLD`
 - **Voice:** edit `prompts/brand-voice.md` and bump its `version`. Every message records which version wrote it.
 - **Sales approach:** `prompts/sales-supervisor.md`. Rules that must always hold live in `src/agents/supervisor.ts`.
+
+## Older enquiries (backlog)
+
+Instagram only allows automated replies within 24 hours of a lead's last message, and ManyChat doesn't share past DM history. For older DMs, use **backlog** in the dashboard:
+
+1. Copy the conversation from Instagram and paste it in. Start her lines with `her:` and yours with `me:` (or paste just her message as it is).
+2. Click **write my reply**. The AI drafts a reply in your voice with your real prices and links, the same way it does for new leads.
+3. Copy each bubble into her Instagram chat yourself, then click **i've sent it**.
+
+Backlog drafts are never sent automatically and never get automated follow-ups. If she replies and it comes through ManyChat, the system recognises her by her handle and carries on with the full history.
