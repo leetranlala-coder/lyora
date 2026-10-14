@@ -49,11 +49,11 @@ Use official integrations only. No scraping, and never your Instagram password.
 2. In ManyChat, add an **External Request** action to the flow that catches DMs (e.g. the Default Reply):
    - POST `https://<your-server>/webhooks/manychat`
    - header `X-Lyora-Secret: <MANYCHAT_WEBHOOK_SECRET>`
-   - JSON body:
+   - JSON body: just the contact id. The server looks up the message text from ManyChat itself, so quote marks or emojis in a message can't break anything:
      ```json
-     { "subscriber_id": "{{user_id}}", "username": "{{ig_username}}", "name": "{{full_name}}",
-       "email": "{{email}}", "text": "{{last_input_text}}", "source": "default reply" }
+     {"subscriber_id": "{{user_id}}"}
      ```
+     Insert **Contact Id** with the {+} button between the quotes. If ManyChat swallows the opening `{`, click at the start and type it again (press Esc if the field picker pops up).
 3. Only send the **Default Reply** (messages that don't match a keyword) to this system. Leave your keyword flows (PREVIEW, KIT/PRODUCTS, CALL/1:1, booking) exactly as they are, and make sure the Default Reply isn't also auto-replying, or leads will get two replies.
 4. Before going live, check the field names and the sending endpoint (`/fb/sending/sendContent`) against ManyChat's current API docs.
 

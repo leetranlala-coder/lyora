@@ -115,3 +115,31 @@ describe("bookings", () => {
     expect(h.repos.followUps.scheduledForLead(lead.id)).toHaveLength(0);
   });
 });
+
+describe("manychat body is forgiving", () => {
+  const fakeFetch = (data: Record<string, unknown>) =>
+    (async () => new Response(JSON.stringify({ status: "success", data }), { status: 200 })) as unknown as typeof fetch;
+  const provider = () =>
+    new ManyChatProvider({ apiKey: "k", webhookSecret: "s" }, fakeFetch({ last_input_text: 'hi "babe" i\'m a beginner\nhow much?', ig_username: "nailbabe", name: "Jess", last_interaction: "2026-10-14T15:00:00Z" }));
+
+  it("only a contact id is needed — the text is looked up from ManyChat", async () => {
+    const p = provider();
+    const parsed = await p.enrich(p.parseWebhook({ "x-lyora-secret": "s" }, '{"subscriber_id": "12345"}'));
+    expect(parsed.inbound[0]).toMatchObject({ platform_user_id: "12345", username: "nailbabe", display_name: "Jess" });
+    expect(parsed.inbound[0]!.text).toContain('"babe"');
+  });
+
+  it("survives doubled quotes from to_json and extra closing braces", async () => {
+    const p = provider();
+    const broken = '{"subscriber_id": ""12345"", "text": ""hi "babe""", "name": "Jess", "email": null}}}';
+    const parsed = await p.enrich(p.parseWebhook({ "x-lyora-secret": "s" }, broken));
+    expect(parsed.inbound[0]!.platform_user_id).toBe("12345");
+    expect(parsed.inbound[0]!.text).toContain("beginner");
+  });
+
+  it("uses the text from the body when it arrives cleanly (no lookup)", async () => {
+    const p = new ManyChatProvider({ apiKey: "k", webhookSecret: "s" }, (async () => { throw new Error("should not fetch"); }) as unknown as typeof fetch);
+    const parsed = await p.enrich(p.parseWebhook({ "x-lyora-secret": "s" }, JSON.stringify({ subscriber_id: 987, text: "hello" })));
+    expect(parsed.inbound[0]).toMatchObject({ platform_user_id: "987", text: "hello" });
+  });
+});

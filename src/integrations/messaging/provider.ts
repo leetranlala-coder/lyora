@@ -36,6 +36,8 @@ export interface MessagingProvider {
   sendMessage(lead: Lead, text: string, idempotencyKey: string): Promise<{ providerMessageId: string }>;
   /** Verify the request signature and normalise the payload. Throws WebhookAuthError if invalid. */
   parseWebhook(headers: Record<string, string | undefined>, rawBody: string): ParsedWebhook;
+  /** Optional: fill in details the webhook didn't carry (e.g. look up the message text by contact id). */
+  enrich?(parsed: ParsedWebhook): Promise<ParsedWebhook>;
   /** Optional: fetch history from the provider (not all providers expose this). */
   getConversation?(lead: Lead): Promise<InboundEvent[]>;
   /** Optional: poll for messages if the provider has no webhooks. */
