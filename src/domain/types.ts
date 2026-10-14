@@ -272,7 +272,8 @@ export interface OutboundMessage {
   content: string;
   status: "draft" | "queued" | "sent" | "failed" | "discarded";
   idempotency_key: string;
-  trigger: "reply" | "followup";
+  /** manual = written for Lee to copy and send herself (backlog); never sent through the API */
+  trigger: "reply" | "followup" | "manual";
   trigger_ref: string | null;
   decision_action: string | null;
   provider_message_id: string | null;

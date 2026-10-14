@@ -67,9 +67,21 @@ describe("http server", () => {
     const a = app();
     expect((await a.router.handle(req("GET", "/admin", { headers: { authorization: "" } }))).status).toBe(401);
     expect((await a.router.handle(req("POST", "/admin/leads/x/takeover", { headers: { origin: "https://evil.example" } }))).status).toBe(403);
-    for (const p of ["/admin", "/admin/leads", "/admin/drafts", "/admin/handoffs", "/admin/analytics", "/admin/products", "/admin/purchases"]) {
+    for (const p of ["/admin", "/admin/leads", "/admin/drafts", "/admin/backlog", "/admin/handoffs", "/admin/analytics", "/admin/products", "/admin/purchases"]) {
       expect((await a.router.handle(req("GET", p))).status).toBe(200);
     }
+  });
+
+  it("backlog form writes a copy-and-send draft", async () => {
+    const a = app();
+    const r = await a.router.handle(req("POST", "/admin/backlog", { form: { handle: "@oldlead", name: "Jess", text: "her: hi i'm a complete beginner, can you tell me about the course?" } }));
+    expect(r.status).toBe(303);
+    const lead = a.repos.leads.findByUsername("oldlead")!;
+    const page = await a.router.handle(req("GET", `/admin/leads/${lead.id}`));
+    expect(page.body).toContain("copy &amp; send yourself");
+    expect(page.body).toContain("i've sent it");
+    const bad = await a.router.handle(req("POST", "/admin/backlog", { form: { handle: "", text: "x" } }));
+    expect(bad.status).toBe(200);
   });
 
   it("take over / resume from the dashboard", async () => {

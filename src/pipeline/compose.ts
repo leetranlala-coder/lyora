@@ -19,6 +19,7 @@ export async function composeValidated(
     conversation: Message[];
     facts: Fact[];
     followUpContext?: string;
+    lateReply?: boolean;
   },
 ): Promise<{ ok: true; messages: string[] } | { ok: false; issues: SafetyIssue[] }> {
   const now = () => ctx.clock.now().toISOString();
@@ -33,6 +34,7 @@ export async function composeValidated(
       conversation: input.conversation,
       facts: input.facts,
       followUpContext: input.followUpContext,
+      lateReply: input.lateReply,
       previousIssues,
     });
     const messages = gen.output.messages.map(cleanBubble).filter(Boolean);

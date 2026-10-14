@@ -127,7 +127,7 @@ export class LyoraAgent {
   }
 
   // ------------------------------------------------------------------ processing
-  async processLead(leadId: string, opts: { ignoreQuietPeriod?: boolean } = {}): Promise<ProcessResult> {
+  async processLead(leadId: string, opts: { ignoreQuietPeriod?: boolean; manual?: boolean } = {}): Promise<ProcessResult> {
     const { repos, cfg } = this.ctx;
     const owner = `${this.ctx.workerId}:${newId()}`;
     if (!repos.locks.acquire(leadId, owner, this.ctx.clock.now(), cfg.LOCK_TTL_SECONDS)) return { status: "locked" };
@@ -147,7 +147,7 @@ export class LyoraAgent {
     }
   }
 
-  private async runReply(leadId: string, opts: { ignoreQuietPeriod?: boolean }): Promise<ProcessResult> {
+  private async runReply(leadId: string, opts: { ignoreQuietPeriod?: boolean; manual?: boolean }): Promise<ProcessResult> {
     const { repos, cfg } = this.ctx;
     const lead = repos.leads.get(leadId);
     if (!lead) return { status: "not_found" };
@@ -200,7 +200,11 @@ export class LyoraAgent {
     repos.audit.write({ lead_id: lead.id, run_id: runId, stage: "scoring", event: "scored", data: score, now });
 
     // ---- 3. human takeover: record everything, send nothing
-    const current = repos.leads.get(lead.id)!;
+    const stored = repos.leads.get(lead.id)!;
+    // Backlog drafts are requested by Lee herself and only ever copied by her, so her own
+    // takeover / open handoff / earlier pause don't block them. Stop requests and sensitive
+    // topics still do (pre-rules run on the new messages as usual).
+    const current = opts.manual ? { ...stored, human_takeover: false, handoff_required: false, automation_status: "active" as const } : stored;
     if (current.human_takeover) {
       repos.audit.write({ lead_id: lead.id, run_id: runId, stage: "supervisor", event: "skipped_human_takeover", now });
       finish();
@@ -274,7 +278,7 @@ export class LyoraAgent {
       });
       let composed;
       try {
-        composed = await composeValidated(this.ctx, { leadId: lead.id, runId, trigger: "reply", decision, analysis, conversation, facts });
+        composed = await composeValidated(this.ctx, { leadId: lead.id, runId, trigger: "reply", decision, analysis, conversation, facts, lateReply: !!opts.manual });
       } catch (err) {
         return this.llmFailure(lead, runId, err, finish);
       }
@@ -285,29 +289,31 @@ export class LyoraAgent {
         finish();
         return { status: "handoff", reason };
       }
+      const manual = !!opts.manual;
       const batch = repos.outbound.createBatch({
         lead_id: lead.id,
         messages: composed.messages,
-        status: cfg.SEND_MODE === "auto" ? "queued" : "draft",
-        trigger: "reply",
+        status: !manual && cfg.SEND_MODE === "auto" ? "queued" : "draft",
+        trigger: manual ? "manual" : "reply",
         trigger_ref: pending[pending.length - 1]!.id,
         decision_action: decision.action,
         now: this.now(),
       });
       batchId = batch[0]?.batch_id;
       for (const id of decision.product_ids) repos.offers.record(lead.id, id, decision.action, this.now());
-      if (batchId && cfg.SEND_MODE === "auto") {
+      if (batchId && !manual && cfg.SEND_MODE === "auto") {
         const sent = await sendBatch(this.ctx, batchId, "agent");
         outcome = sent.status === "sent" ? "sent" : `send_${sent.status}`;
       } else {
-        outcome = batchId ? "draft_created" : "duplicate_batch";
-        repos.audit.write({ lead_id: lead.id, run_id: runId, stage: "send", event: "draft_created", data: { batchId }, now: this.now() });
+        outcome = batchId ? (manual ? "copy_draft_created" : "draft_created") : "duplicate_batch";
+        repos.audit.write({ lead_id: lead.id, run_id: runId, stage: "send", event: manual ? "copy_draft_created" : "draft_created", data: { batchId }, now: this.now() });
       }
     }
 
     // ---- 7. follow-up scheduling
     const after = repos.leads.get(lead.id)!;
-    if ((OFFER_ACTIONS.has(decision.action) || decision.next_follow_up_hours) && after.automation_status === "active" && !after.handoff_required) {
+    // Backlog (manual) drafts never schedule automated follow-ups: they're outside the messaging window.
+    if (!opts.manual && (OFFER_ACTIONS.has(decision.action) || decision.next_follow_up_hours) && after.automation_status === "active" && !after.handoff_required) {
       const lastLead = pending[pending.length - 1]!.content;
       scheduleFollowUp(this.ctx, after, {
         reason: `${decision.action}: ${decision.reason}`,
