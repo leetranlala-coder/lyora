@@ -223,9 +223,14 @@ export function postRules(
     return { decision: handoff("lead is ready to enrol but no checkout link is configured", "high"), adjustments: adj };
   }
   if (out.action === "OFFER_CALL") {
+    // The booking link is for calls about the online course or 1:1 training, and only when SHE asked for one.
+    // The model never volunteers it: an unasked-for link is what "keeps sending the link" looks like to a lead.
     if (ctx.lead.call_booked) {
       adj.push("call already booked -> WAIT");
       out = { ...out, action: "WAIT", should_send_message: false };
+    } else if (!ctx.analysis.call_interest) {
+      adj.push("OFFER_CALL -> NURTURE (she did not ask for a call; the booking link is only sent on request)");
+      out = { ...out, action: "NURTURE" };
     } else if (!refs.some((p) => p.booking_url) && !ctx.defaultBookingUrl) {
       return { decision: handoff("lead wants a call but no booking link is configured", "high"), adjustments: adj };
     }

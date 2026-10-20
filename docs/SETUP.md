@@ -55,6 +55,7 @@ Use official integrations only. No scraping, and never your Instagram password.
      ```
      Insert **Contact Id** with the {+} button between the quotes. If ManyChat swallows the opening `{`, click at the start and type it again (press Esc if the field picker pops up).
 3. Only send the **Default Reply** (messages that don't match a keyword) to this system. Leave your keyword flows (PREVIEW, KIT/PRODUCTS, CALL/1:1, booking) exactly as they are, and make sure the Default Reply isn't also auto-replying, or leads will get two replies.
+   **Keyword flows fire before this system sees anything.** If a flow is triggered by a broad word like "book", "booking" or "appointment", a nail client typing "can i book in" gets the call link from ManyChat, not from the AI. Keep the CALL flow on words that only a course lead would use ("call", "zoom", "chat with lee") and let nail clients fall through to the Default Reply, where they are handed to you.
 4. Before going live, check the field names and the sending endpoint (`/fb/sending/sendContent`) against ManyChat's current API docs.
 
 ManyChat doesn't tell this system when you reply yourself in the Instagram app, so use **take over** in the dashboard when you jump into a conversation.
@@ -87,7 +88,7 @@ Tip: add an "Instagram handle" field to your Kajabi checkout so purchases match 
 
 ## 5. Connect calls (optional)
 
-- Set `DEFAULT_BOOKING_URL` (or `booking_url` on a product) so the AI can offer a call.
+- Set `DEFAULT_BOOKING_URL` (or `booking_url` on a product) so the AI can offer a call. The link is only ever sent when a lead asks to talk about the online course or 1:1 training. Nail clients (someone wanting a set, infills, prices for a service, availability) are handed to you with no reply and never sent any link; you book them yourself.
 - For Calendly, add a webhook to `/webhooks/calendly` (events `invitee.created`, `invitee.canceled`), set `CALENDLY_WEBHOOK_SIGNING_KEY`, and add a booking question that mentions "Instagram" so bookings match the DM.
 - Without a booking link, a lead who wants a call is handed to you.
 - Google Calendar sync isn't implemented yet. Its push notifications need OAuth and a sync step, so use Calendly or mark calls booked from the dashboard.

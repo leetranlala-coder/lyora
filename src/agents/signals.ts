@@ -66,7 +66,11 @@ const R = {
   claimsPurchased:
     /\b(i (just )?(paid|enrolled|enrolled|purchased|bought|signed up|joined)|just paid|payment (has )?(gone|went) through|i'?ve (paid|enrolled|purchased|bought|signed up))\b/i,
   clientBooking:
-    /\b(book (me )?in|book an appointment|nail appointment|an appointment|do my nails|get my nails done|available for a set|any (spots|availability|openings)|have (a |any )?(spot|availability|opening)s?|can i get (a set|infills|a fill)|infill appointment)\b/i,
+    /\b(book (me )?in|book an appointment|nail appointment|an appointment|do my nails|get my nails done|available for a set|any (spots|availability|openings)|have (a |any )?(spot|availability|opening)s?|can i get (a set|infills|a fill)|infill appointment|taking (new )?clients|walk[- ]?ins?|come in (for|on|this|next|tomorrow|today)|where (are you|is the salon) (located|based)|what'?s your address|price list)\b/i,
+  // A nail SERVICE named together with a price / availability / booking word. "how much for a full set",
+  // "do you do biab?", "any spots for infills?" are clients, not course leads. "i want to learn gel-x" is not caught.
+  nailService:
+    /\b(how much (is|for|are|do you charge)|price[s]? (for|of)|cost (for|of)|do you (do|offer)|can i (get|book|come in for)|are you (free|available|open)|any (spots?|availability|openings?|time)|appointment|book(ing)?)\b[^.?!\n]{0,40}?\b(full set|a set|sets|infills?|refills?|rebalance|biab|gel ?x|gelx|acrylics?|shellac|soak[- ]?off|removal|manicure|pedicure|nail art|french tips?)\b|\b(full set|a set|infills?|refills?|rebalance|biab|gel ?x|gelx|acrylics?|shellac|soak[- ]?off|removal|manicure|pedicure)\b[^.?!\n]{0,40}?\b(how much|price|cost|appointment|book(ing)? (me )?in|availability|any spots?|this (week|weekend|saturday|sunday|monday|tuesday|wednesday|thursday|friday)|next (week|weekend))\b/i,
   possibleMinor:
     /\b(i'?m|im|i am) (1[0-7])\b|\b(1[0-7]) ?(yo|y\/o|years? old)\b|\byear (9|10|11|12)\b|\b(in|at) high ?school\b|\bstill (at|in) school\b|\bwace\b/i,
   oneToOneEnquiry:
@@ -144,7 +148,8 @@ export function detectSignals(text: string): Signals {
     customPricing: test(R.customPricing),
     wantsLee: test(R.wantsLee),
     claimsPurchased: test(R.claimsPurchased),
-    clientBooking: test(R.clientBooking) && !test(R.wantsCall),
+    // A nail service named next to a price/availability word is a client even if the word "call" appears.
+    clientBooking: test(R.nailService) || (test(R.clientBooking) && !test(R.wantsCall)),
     possibleMinor: test(R.possibleMinor),
     oneToOneEnquiry: test(R.oneToOneEnquiry),
     priceAsk: test(R.priceAsk),

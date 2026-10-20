@@ -302,6 +302,33 @@ describe("lee's business rules (from the 5 Oct handover)", () => {
     expect(h.drafts(lead.id)).toHaveLength(0);
   });
 
+  it("nail clients asking prices or availability for a service never get the booking link", async () => {
+    const h = makeHarness({ settings: { DEFAULT_BOOKING_URL: BOOKING_URL, SEND_MODE: "auto" } });
+    for (const msg of [
+      "hey how much for a full set of gel x?",
+      "do you do biab? any spots next week",
+      "can i book in for infills on saturday",
+      "where are you located and what's your price list",
+    ]) {
+      const { lead, result } = await h.dm(msg);
+      expect(done(result).decision.action).toBe("HUMAN_HANDOFF");
+      expect(h.repos.leads.get(lead.id)!.handoff_reason).toMatch(/appointment/);
+      expect(h.outboundText(lead.id)).toBe("");
+    }
+    expect(h.messaging.sent.map((s) => s.text).join(" ")).not.toContain(BOOKING_URL);
+  });
+
+  it("the booking link is only sent when she asked for a call, never volunteered", async () => {
+    const llm = new MockLLMProvider({
+      decision: { action: "OFFER_CALL", product_ids: ["online-course"], should_send_message: true, confidence: 0.9 },
+    });
+    const h = makeHarness({ llm, settings: { DEFAULT_BOOKING_URL: BOOKING_URL, SEND_MODE: "auto" } });
+    const { lead, result } = await h.dm("i'm a beginner and keen to start the online course");
+    const r = done(result);
+    expect(r.decision.action).toBe("NURTURE");
+    expect(h.outboundText(lead.id)).not.toContain(BOOKING_URL);
+  });
+
   it("possible under-18s are never sold to", async () => {
     const h = makeHarness();
     const { lead, result } = await h.dm("hi i'm 16 and in year 11, how much is the course?");
